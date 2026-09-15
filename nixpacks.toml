@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python312", "zbar"]
+nixPkgs = ["python312", "python312Packages.pip", "zbar"]
 
 [phases.install]
 cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
