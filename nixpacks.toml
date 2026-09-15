@@ -2,7 +2,12 @@
 nixPkgs = ["python312", "python312Packages.pip", "zbar"]
 
 [phases.install]
-cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]
+cmds = [
+  "python -m venv /app/.venv",
+  "source /app/.venv/bin/activate",
+  "pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
 
 [start]
-cmd = "python FRONTEND/frontend.py"
+cmd = "source /app/.venv/bin/activate && python FRONTEND/frontend.py"
