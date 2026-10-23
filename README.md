@@ -95,6 +95,13 @@ debe tener al menos 12 caracteres. Las contraseñas se almacenan con hash PBKDF2
 - `historial_reinicios\`: copias creadas al reiniciar la plataforma.
 - `historial_reinicios\legacy\`: bases antiguas conservadas como referencia.
 
+Si la base está vacía o necesitas agregar estudiantes, ingresa como administrador,
+abre **Base de datos del sistema** y selecciona **Cargar estudiantes desde CSV**.
+El archivo debe incluir las columnas `CODIGO` y `TARJETA_IDENTIDAD` (o
+`DOCUMENTO`); se aceptan separadores coma o punto y coma. En Docker, el CSV
+seleccionado se importa directamente a la base del volumen persistente y no es
+necesario incluir datos de estudiantes en la imagen.
+
 Las bases antiguas se conservan como referencia para no perder asistencias
 históricas, pero la aplicación no las usa.
 
@@ -112,9 +119,11 @@ corresponde al panel, no a la aplicación.
 2. Configura las cuatro variables secretas de administrador/docente indicadas
    arriba antes del primer arranque. La aplicación se detendrá si faltan o si
    alguna contraseña tiene menos de 12 caracteres.
-3. Si necesitas cargar el listado inicial, copia `estudiantes.csv` al volumen
-   como `/app/data/estudiantes.csv` antes de iniciar la aplicación. No subas ese
-   archivo, las bases SQLite ni los respaldos a GitHub.
+3. Si la base está vacía, inicia sesión como administrador, abre **Base de datos
+   del sistema** y carga `estudiantes.csv` desde la opción **Cargar estudiantes
+   desde CSV**. También puedes copiarlo al volumen como
+   `/app/data/estudiantes.csv` antes del primer inicio. No subas ese archivo,
+   las bases SQLite ni los respaldos a GitHub.
 4. En Easypanel asigna el dominio `foodpass.programasena.online` al servicio y
    activa HTTPS. El DNS debe tener un registro A hacia la IP pública del
    servidor.

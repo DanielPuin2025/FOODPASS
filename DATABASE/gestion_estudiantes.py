@@ -2,6 +2,7 @@ import calendar
 import csv
 import hashlib
 import hmac
+import io
 import os
 import secrets
 import shutil
@@ -154,6 +155,93 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def importar_estudiantes_csv(contenido):
+    if isinstance(contenido, bytes):
+        texto = contenido.decode("utf-8-sig")
+    else:
+        texto = str(contenido)
+
+    muestra = texto[:2048]
+    delimitador = ";" if ";" in muestra else ","
+    lector = csv.DictReader(io.StringIO(texto, newline=""), delimiter=delimitador)
+    encabezados = {
+        str(encabezado).replace('"', "").replace("'", "").strip().upper()
+        for encabezado in (lector.fieldnames or [])
+        if encabezado
+    }
+    tiene_codigo = "CODIGO" in encabezados or "CÓDIGO" in encabezados
+    tiene_tarjeta = encabezados.intersection(
+        {"TARJETA", "TARJETA_IDENTIDAD", "DOCUMENTO"}
+    )
+    if not tiene_codigo or not tiene_tarjeta:
+        raise ValueError(
+            "El CSV debe incluir las columnas CODIGO y TARJETA_IDENTIDAD (o DOCUMENTO)."
+        )
+
+    registrados = 0
+    omitidos = 0
+    errores = 0
+
+    with get_connection() as conn:
+        for fila in lector:
+            fila_limpia = {
+                str(clave).replace('"', "").replace("'", "").strip().upper():
+                (valor or "").strip()
+                for clave, valor in fila.items()
+                if clave
+            }
+            codigo = fila_limpia.get("CODIGO") or fila_limpia.get("CÓDIGO")
+            tarjeta = (
+                fila_limpia.get("TARJETA")
+                or fila_limpia.get("TARJETA_IDENTIDAD")
+                or fila_limpia.get("DOCUMENTO")
+            )
+            if not codigo or not tarjeta:
+                errores += 1
+                continue
+
+            n1 = fila_limpia.get("NOMBRE1", "")
+            n2 = fila_limpia.get("NOMBRE2", "")
+            nombre = (
+                f"{n1} {n2}".strip()
+                if n1 or n2
+                else fila_limpia.get("NOMBRE", "Sin Nombre")
+            )
+            a1 = fila_limpia.get("APELLIDO1", "")
+            a2 = fila_limpia.get("APELLIDO2", "")
+            apellidos = (
+                f"{a1} {a2}".strip()
+                if a1 or a2
+                else fila_limpia.get("APELLIDOS", "Sin Apellido")
+            )
+            grado = fila_limpia.get("GRADO") or "S/D"
+
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO estudiantes
+                        (codigo, tarjeta_identidad, grado, nombre, apellidos)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (codigo, tarjeta, grado, nombre, apellidos),
+                )
+                registrados += 1
+            except sqlite3.IntegrityError as exc:
+                if "UNIQUE" in str(exc) or "PRIMARY KEY" in str(exc):
+                    omitidos += 1
+                else:
+                    errores += 1
+
+        conn.commit()
+
+    return {
+        "registrados": registrados,
+        "omitidos": omitidos,
+        "errores": errores,
+    }
+
+
 def crear_tablas():
     usuarios_iniciales = _usuarios_iniciales()
     produccion = os.environ.get("FOODPASS_ENV", "development").strip().lower() == "production"
@@ -244,50 +332,17 @@ def crear_tablas():
 
         conn.commit()
 
-    # Si la tabla de estudiantes está vacía, cargar el CSV inicial del proyecto.
+    # Si la tabla está vacía, cargar el CSV inicial configurado.
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM estudiantes")
         if cursor.fetchone()[0] == 0 and CSV_PATH.exists():
-            with open(CSV_PATH, mode='r', encoding='utf-8-sig', newline='') as archivo:
-                muestra = archivo.read(2048)
-                archivo.seek(0)
-                delimitador = ';' if ';' in muestra else ','
-                lector_csv = csv.DictReader(archivo, delimiter=delimitador)
-
-                for fila in lector_csv:
-                    fila_limpia = {
-                        str(k).replace('"', '').replace("'", '').strip().upper(): str(v).strip()
-                        for k, v in fila.items() if k
-                    }
-
-                    codigo = fila_limpia.get('CODIGO') or fila_limpia.get('CÓDIGO')
-                    tarjeta = fila_limpia.get('TARJETA') or fila_limpia.get('TARJETA_IDENTIDAD') or fila_limpia.get('DOCUMENTO')
-                    grado = fila_limpia.get('GRADO') or 'S/D'
-
-                    n1 = fila_limpia.get('NOMBRE1', '')
-                    n2 = fila_limpia.get('NOMBRE2', '')
-                    nombre = f"{n1} {n2}".strip() if (n1 or n2) else fila_limpia.get('NOMBRE', 'Sin Nombre')
-
-                    a1 = fila_limpia.get('APELLIDO1', '')
-                    a2 = fila_limpia.get('APELLIDO2', '')
-                    apellidos = f"{a1} {a2}".strip() if (a1 or a2) else fila_limpia.get('APELLIDOS', 'Sin Apellido')
-
-                    if not codigo or not tarjeta:
-                        continue
-
-                    try:
-                        conn.execute(
-                            """
-                            INSERT INTO estudiantes (codigo, tarjeta_identidad, grado, nombre, apellidos)
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (codigo, tarjeta, grado, nombre, apellidos),
-                        )
-                    except sqlite3.IntegrityError:
-                        pass
-
-                conn.commit()
+            resultado = importar_estudiantes_csv(CSV_PATH.read_bytes())
+            if resultado["errores"]:
+                print(
+                    "La carga inicial del CSV tuvo "
+                    f"{resultado['errores']} fila(s) inválida(s)."
+                )
 
 # --- CONSULTAS Y REGISTRO ---
 

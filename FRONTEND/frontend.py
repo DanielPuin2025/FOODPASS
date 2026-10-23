@@ -496,6 +496,47 @@ async def main(page: ft.Page):
             padding=12,
         )
 
+        async def importar_lista_estudiantes(e):
+            archivos = await file_picker.pick_files(
+                dialog_title="Seleccionar lista de estudiantes",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["csv"],
+                allow_multiple=False,
+                with_data=True,
+            )
+            if not archivos:
+                return
+
+            archivo = archivos[0]
+            if archivo.bytes is None:
+                raise RuntimeError(
+                    "No se pudieron leer los datos del archivo CSV seleccionado."
+                )
+
+            try:
+                resultado = db.importar_estudiantes_csv(archivo.bytes)
+            except (ValueError, sqlite3.Error) as exc:
+                page.snack_bar = ft.SnackBar(
+                    ft.Text(f"No se pudo importar el CSV: {exc}"),
+                    bgcolor="#D32F2F",
+                )
+                page.snack_bar.open = True
+                page.update()
+                return
+
+            mensaje = (
+                f"Importados: {resultado['registrados']} | "
+                f"Ya existentes: {resultado['omitidos']} | "
+                f"Filas inválidas: {resultado['errores']}"
+            )
+            page.snack_bar = ft.SnackBar(
+                ft.Text(mensaje),
+                bgcolor="#D32F2F" if resultado["errores"] else "#2A4B1A",
+            )
+            page.snack_bar.open = True
+            abrir_vista_base_datos(nombre_admin)
+            page.update()
+
         def abrir_historial_estudiante(e):
             codigo = (historial_input.value or "").strip()
 
@@ -634,6 +675,12 @@ async def main(page: ft.Page):
                         f"Total Registros: {resumen['total']} | Estudiantes: {resumen['estudiantes']} | Presentes Hoy: {resumen['presentes']}",
                         size=13,
                         color="black",
+                    ),
+                    ft.Button(
+                        "Cargar estudiantes desde CSV",
+                        on_click=importar_lista_estudiantes,
+                        bgcolor=COLOR_AMARILLO_LOGO,
+                        color="white",
                     ),
                     grafico_asistencia,
                     ft.Row(
