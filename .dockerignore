@@ -1,0 +1,17 @@
+.git
+.venv
+.venv-*/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.env
+.env.*
+data/
+historial_reinicios/
+DATABASE/estudiantes.csv
+codigos_qr_*/
+sync_pendiente.json
+sync_log.json

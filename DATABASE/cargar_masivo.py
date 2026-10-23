@@ -1,12 +1,17 @@
 import csv
 import sqlite3
 from pathlib import Path
+import sys
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB = str(BASE_DIR / "restaurante.db")
-CSV_FILE = str(BASE_DIR / "DATABASE" / "estudiantes.csv")
+DATABASE_DIR = BASE_DIR / "DATABASE"
+if str(DATABASE_DIR) not in sys.path:
+    sys.path.insert(0, str(DATABASE_DIR))
 
-def importar_estudiantes_csv(nombre_archivo):
+from gestion_estudiantes import CSV_PATH, crear_tablas, get_connection
+
+
+def importar_estudiantes_csv(nombre_archivo=CSV_PATH):
     registrados = 0
     omitidos = 0
     errores = 0
@@ -19,7 +24,7 @@ def importar_estudiantes_csv(nombre_archivo):
             
             lector_csv = csv.DictReader(archivo, delimiter=delimitador)
             
-            with sqlite3.connect(DB, timeout=10) as conexion:
+            with get_connection() as conexion:
                 cursor = conexion.cursor()
                 
                 for fila in lector_csv:
@@ -71,7 +76,5 @@ def importar_estudiantes_csv(nombre_archivo):
         print(f"⚠️ Ocurrió un error inesperado: {e}")
 
 if __name__ == "__main__":
-    from gestion_estudiantes import crear_tablas
-
     crear_tablas()
-    importar_estudiantes_csv(CSV_FILE)
+    importar_estudiantes_csv()

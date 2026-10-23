@@ -1,15 +1,109 @@
+import calendar
 import csv
+import hashlib
+import hmac
+import os
+import secrets
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB = str(BASE_DIR / "restaurante.db")
-CSV_PATH = BASE_DIR / "DATABASE" / "estudiantes.csv"
-HISTORIAL_DIR = BASE_DIR / "historial_reinicios"
+DATA_DIR = Path(os.environ.get("FOODPASS_DATA_DIR", str(BASE_DIR))).expanduser().resolve()
+DB = str(DATA_DIR / "restaurante.db")
+CSV_PATH = Path(
+    os.environ.get(
+        "FOODPASS_STUDENTS_CSV",
+        str(BASE_DIR / "DATABASE" / "estudiantes.csv"),
+    )
+)
+HISTORIAL_DIR = DATA_DIR / "historial_reinicios"
+DATA_DIR.mkdir(exist_ok=True, parents=True)
 HISTORIAL_DIR.mkdir(exist_ok=True, parents=True)
 grados_disponibles = ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B", "10A", "10B", "11A"]
+
+PASSWORD_HASH_ITERATIONS = 600_000
+
+
+def _hash_password(password):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PASSWORD_HASH_ITERATIONS,
+    )
+    return f"pbkdf2_sha256${PASSWORD_HASH_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _password_hash_matches(password, stored_password):
+    try:
+        scheme, iterations_text, salt_text, digest_text = stored_password.split("$")
+        iterations = int(iterations_text)
+        salt = bytes.fromhex(salt_text)
+        expected = bytes.fromhex(digest_text)
+        if scheme != "pbkdf2_sha256" or not 100_000 <= iterations <= 2_000_000:
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(actual, expected)
+
+
+def verificar_password(password, stored_password):
+    if not password or not stored_password:
+        return False
+
+    if stored_password.startswith("pbkdf2_sha256$"):
+        return _password_hash_matches(password, stored_password)
+
+    if not hmac.compare_digest(password, stored_password):
+        return False
+
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE usuarios SET password = ? WHERE password = ?",
+            (_hash_password(password), stored_password),
+        )
+        conn.commit()
+    return True
+
+
+def _usuarios_iniciales():
+    if os.environ.get("FOODPASS_ENV", "development").strip().lower() != "production":
+        return [
+            ("admin", "admin123", "Administrador Principal", "administrador"),
+            ("3001", "admin123", "Administrador 3001", "administrador"),
+            ("docente", "docente123", "Profesor Guía", "docente"),
+            ("2001", "docente123", "Profesor 2001", "docente"),
+        ]
+
+    admin_usuario = os.environ.get("FOODPASS_ADMIN_USER", "").strip()
+    admin_password = os.environ.get("FOODPASS_ADMIN_PASSWORD", "")
+    docente_usuario = os.environ.get("FOODPASS_DOCENTE_USER", "").strip()
+    docente_password = os.environ.get("FOODPASS_DOCENTE_PASSWORD", "")
+
+    if not all((admin_usuario, admin_password, docente_usuario, docente_password)):
+        raise RuntimeError(
+            "En producción configura FOODPASS_ADMIN_USER, "
+            "FOODPASS_ADMIN_PASSWORD, FOODPASS_DOCENTE_USER y "
+            "FOODPASS_DOCENTE_PASSWORD."
+        )
+    if admin_usuario == docente_usuario:
+        raise RuntimeError("El usuario administrador y el docente deben ser distintos.")
+    if len(admin_password) < 12 or len(docente_password) < 12:
+        raise RuntimeError("Las contraseñas de producción deben tener al menos 12 caracteres.")
+
+    return [
+        (admin_usuario, admin_password, "Administrador", "administrador"),
+        (docente_usuario, docente_password, "Docente", "docente"),
+    ]
 
 
 def _normalizar_hora(hora):
@@ -61,6 +155,8 @@ def get_connection():
     return conn
 
 def crear_tablas():
+    usuarios_iniciales = _usuarios_iniciales()
+    produccion = os.environ.get("FOODPASS_ENV", "development").strip().lower() == "production"
     with get_connection() as conn:
         cursor = conn.cursor()
         # Estudiantes
@@ -104,19 +200,47 @@ def crear_tablas():
             "INSERT OR IGNORE INTO configuracion_horario (id, hora_inicio, hora_fin) VALUES (1, '11:30', '12:00')"
         )
 
-        # INSERTAR / ACTUALIZAR USUARIOS DE PRUEBA
-        usuarios_iniciales = [
-            ('admin', 'admin123', 'Administrador Principal', 'administrador'),
-            ('3001', 'admin123', 'Administrador 3001', 'administrador'),
-            ('docente', 'docente123', 'Profesor Guía', 'docente'),
-            ('2001', 'docente123', 'Profesor 2001', 'docente')
-        ]
+        if produccion:
+            usuarios_prueba = {
+                "admin": "admin123",
+                "3001": "admin123",
+                "docente": "docente123",
+                "2001": "docente123",
+            }
+            for usuario, password_prueba in usuarios_prueba.items():
+                existente = cursor.execute(
+                    "SELECT password FROM usuarios WHERE usuario = ?",
+                    (usuario,),
+                ).fetchone()
+                if existente and (
+                    existente["password"] == password_prueba
+                    or _password_hash_matches(password_prueba, existente["password"])
+                ):
+                    cursor.execute("DELETE FROM usuarios WHERE usuario = ?", (usuario,))
 
         for usr, pwd, nom, rol in usuarios_iniciales:
-            cursor.execute("""
-                INSERT OR REPLACE INTO usuarios (usuario, password, nombre, rol)
-                VALUES (?, ?, ?, ?)
-            """, (usr, pwd, nom, rol))
+            existe = cursor.execute(
+                "SELECT 1 FROM usuarios WHERE usuario = ?",
+                (usr,),
+            ).fetchone()
+            if not existe:
+                cursor.execute(
+                    """
+                    INSERT INTO usuarios (usuario, password, nombre, rol)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (usr, _hash_password(pwd), nom, rol),
+                )
+
+        usuarios_legacy = cursor.execute(
+            "SELECT usuario, password FROM usuarios"
+        ).fetchall()
+        for usuario, password in usuarios_legacy:
+            if not password.startswith("pbkdf2_sha256$"):
+                cursor.execute(
+                    "UPDATE usuarios SET password = ? WHERE usuario = ?",
+                    (_hash_password(password), usuario),
+                )
 
         conn.commit()
 
@@ -226,10 +350,11 @@ def esta_abierto_ahora():
     horario = obtener_horario()
     inicio_min = _hora_a_minutos(horario["hora_inicio"])
     fin_min = _hora_a_minutos(horario["hora_fin"])
-    ahora_min = datetime.now().hour * 60 + datetime.now().minute
+    ahora = datetime.now()
+    ahora_min = ahora.hour * 60 + ahora.minute
 
     if inicio_min is None or fin_min is None:
-        return True
+        return False
 
     if inicio_min < fin_min:
         return inicio_min <= ahora_min < fin_min
@@ -345,25 +470,97 @@ def obtener_reporte_completo_db():
         """, (fecha_hoy,))
         return cursor.fetchall()
 
+
+def obtener_historial_estudiante(codigo):
+    fecha_hoy = datetime.now().date()
+    inicio_semana = fecha_hoy - timedelta(days=fecha_hoy.weekday())
+    fin_semana = inicio_semana + timedelta(days=6)
+    inicio_mes = fecha_hoy.replace(day=1)
+    ultimo_dia_mes = calendar.monthrange(fecha_hoy.year, fecha_hoy.month)[1]
+    fin_mes = fecha_hoy.replace(day=ultimo_dia_mes)
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT e.codigo, e.nombre, e.apellidos, e.tarjeta_identidad,
+                   COUNT(a.id) AS total_registros,
+                   COALESCE(SUM(CASE WHEN DATE(a.fecha_hora) BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS semana,
+                   COALESCE(SUM(CASE WHEN DATE(a.fecha_hora) BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS mes
+            FROM estudiantes e
+            LEFT JOIN asistencias a ON e.tarjeta_identidad = a.tarjeta_estudiante
+            WHERE e.codigo = ?
+            GROUP BY e.codigo, e.nombre, e.apellidos, e.tarjeta_identidad
+            """,
+            (
+                inicio_semana.isoformat(),
+                fin_semana.isoformat(),
+                inicio_mes.isoformat(),
+                fin_mes.isoformat(),
+                codigo,
+            ),
+        )
+        fila = cursor.fetchone()
+        if not fila:
+            return None
+
+        cursor.execute(
+            """
+            SELECT DATE(a.fecha_hora) AS fecha, COUNT(*) AS cantidad
+            FROM estudiantes e
+            JOIN asistencias a ON e.tarjeta_identidad = a.tarjeta_estudiante
+            WHERE e.codigo = ?
+            GROUP BY DATE(a.fecha_hora)
+            ORDER BY DATE(a.fecha_hora) DESC
+            LIMIT 30
+            """,
+            (codigo,),
+        )
+        detalle = [
+            {"fecha": row["fecha"], "cantidad": row["cantidad"]}
+            for row in cursor.fetchall()
+        ]
+
+        return {
+            "codigo": fila["codigo"],
+            "nombre": f"{fila['nombre']} {fila['apellidos']}".strip(),
+            "total_registros": int(fila["total_registros"] or 0),
+            "semana": int(fila["semana"] or 0),
+            "mes": int(fila["mes"] or 0),
+            "detalle": detalle,
+        }
+
+
 def guardar_backup_actual():
     HISTORIAL_DIR.mkdir(exist_ok=True, parents=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    nombre_backup = f"restaurante_backup_{timestamp}.db"
-    destino = HISTORIAL_DIR / nombre_backup
+    timestamp = datetime.now()
+    fecha = timestamp.date()
+    semana = fecha.isocalendar()[1]
+    mes_nombre = calendar.month_name[fecha.month]
+    mes_dir = HISTORIAL_DIR / str(fecha.year) / f"{fecha.month:02d}_{mes_nombre.lower()}" / f"semana_{semana:02d}"
+    mes_dir.mkdir(parents=True, exist_ok=True)
+
+    nombre_backup = f"restaurante_backup_{fecha.isoformat()}_{timestamp.strftime('%H-%M-%S')}.db"
+    destino = mes_dir / nombre_backup
     shutil.copy2(DB, destino)
 
     resumen = {
-        "timestamp": timestamp,
+        "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        "fecha_calendario": fecha.isoformat(),
+        "anio": fecha.year,
+        "mes": f"{fecha.month:02d}_{mes_nombre}",
+        "semana": f"Semana {semana}",
         "archivo": nombre_backup,
         "total_asistencias": contar_asistencias_hoy(),
         "ruta": str(destino),
+        "ruta_persistente": str(destino.relative_to(BASE_DIR)),
     }
-    resumen_path = HISTORIAL_DIR / f"restaurante_backup_{timestamp}.json"
+    resumen_path = mes_dir / f"restaurante_backup_{fecha.isoformat()}_{timestamp.strftime('%H-%M-%S')}.json"
     with open(resumen_path, "w", encoding="utf-8") as archivo:
         import json
         json.dump(resumen, archivo, ensure_ascii=False, indent=2)
 
-    return {"nombre": nombre_backup, "ruta": str(destino), "resumen": resumen_path}
+    return {"nombre": nombre_backup, "ruta": str(destino), "resumen": str(resumen_path), "fecha": fecha.isoformat(), "mes": resumen["mes"], "semana": resumen["semana"]}
 
 
 def contar_asistencias_hoy():
@@ -380,23 +577,71 @@ def contar_asistencias_hoy():
 def listar_historial_reinicios():
     HISTORIAL_DIR.mkdir(exist_ok=True, parents=True)
     archivos = []
-    for path in sorted(HISTORIAL_DIR.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path in sorted(HISTORIAL_DIR.rglob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
+        resumen = path.with_suffix(".json")
+        try:
+            fecha_str = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            fecha_str = path.name
+
         archivos.append({
             "nombre": path.name,
-            "fecha": datetime.fromtimestamp(path.stat().st_mtime).strftime("%d/%m/%Y %H:%M:%S"),
+            "fecha": fecha_str,
             "tamano_kb": round(path.stat().st_size / 1024, 2),
             "ruta": str(path),
+            "resumen": str(resumen) if resumen.exists() else None,
         })
     return archivos
 
 
 def reiniciar_plataforma():
+    """
+    Guarda las asistencias del día actual en el historial y las borra.
+    Mantiene el histórico de los últimos 30 días.
+    """
+    # Primero guardar el backup del día
+    guardar_asistencias_del_dia_automatico()
+
+    # Luego limpiar solo el día actual
     backup = guardar_backup_actual()
+
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM asistencias")
         conn.commit()
-    return True, f"Se guardó el estado previo en {backup['nombre']} y la plataforma fue reiniciada. Todos los estudiantes quedaron en ausente."
+
+    # Limpiar histórico antiguo (más de 30 días)
+    eliminados = limpiar_historial_antiguo(30)
+
+    msg = f"Se guardó un nuevo registro en {backup['nombre']} y la plataforma fue reiniciada."
+    if eliminados > 0:
+        msg += f" Se eliminaron {eliminados} respaldos antiguos (>30 días)."
+
+    return True, msg
+
+
+def eliminar_registro_historial(nombre_archivo):
+    if not nombre_archivo:
+        return False, "No se especificó un registro para eliminar."
+
+    if nombre_archivo.startswith(str(HISTORIAL_DIR)):
+        base_path = Path(nombre_archivo)
+    else:
+        base_path = HISTORIAL_DIR / nombre_archivo
+
+    db_path = base_path if base_path.suffix.lower() == ".db" else base_path.with_suffix(".db")
+    json_path = base_path if base_path.suffix.lower() == ".json" else base_path.with_suffix(".json")
+
+    eliminados = 0
+    for ruta in (db_path, json_path):
+        if ruta.exists():
+            ruta.unlink()
+            eliminados += 1
+
+    if eliminados == 0:
+        return False, "No se encontró el registro en el historial."
+
+    return True, f"Se eliminó el registro del historial: {db_path.name}"
 
 
 def resetear_usuarios():
@@ -405,7 +650,94 @@ def resetear_usuarios():
         cursor.execute("DROP TABLE IF EXISTS usuarios")
         conn.commit()
     crear_tablas()
-    print("✅ Usuarios restablecidos con éxito: admin/admin123 y docente/docente123")
+    print("✅ Usuarios restablecidos con la configuración inicial.")
+
+
+def guardar_asistencias_del_dia_automatico():
+    """
+    Guarda automáticamente las asistencias del día en el historial
+    sin borrar los datos actuales. Se ejecuta al finalizar el horario.
+    """
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+
+    # Verificar si ya hay asistencias hoy
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as total FROM asistencias WHERE DATE(fecha_hora) = DATE(?)", (fecha_hoy,))
+        total = cursor.fetchone()[0]
+
+        if total == 0:
+            return False, "No hay asistencias para guardar hoy."
+
+    # Crear backup solo del día actual
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_backup = f"asistencias_{timestamp}.db"
+    ruta_backup = HISTORIAL_DIR / nombre_backup
+
+    try:
+        # Copiar base de datos completa
+        shutil.copy2(DB, ruta_backup)
+        return True, f"✅ Asistencias guardadas en {nombre_backup}"
+    except Exception as e:
+        return False, f"❌ Error al guardar: {str(e)}"
+
+
+def limpiar_historial_antiguo(dias_limite=30):
+    """
+    Elimina backups de más de 'dias_limite' días para mantener el histórico limpio.
+    """
+    fecha_limite = datetime.now() - timedelta(days=dias_limite)
+    eliminados = 0
+
+    for archivo in HISTORIAL_DIR.glob("asistencias_*.db"):
+        try:
+            # Extraer fecha del nombre: asistencias_YYYYMMDD_HHMMSS.db
+            partes = archivo.stem.split("_")
+            if len(partes) >= 2:
+                fecha_str = partes[1]  # YYYYMMDD
+                fecha_archivo = datetime.strptime(fecha_str, "%Y%m%d")
+
+                if fecha_archivo < fecha_limite:
+                    archivo.unlink()
+                    eliminados += 1
+        except Exception:
+            continue
+
+    return eliminados
+
+
+def verificar_y_archivar_dia_anterior():
+    """
+    Verifica si hay asistencias de días anteriores y las archiva.
+    Esto se ejecuta al inicio del sistema cada día.
+    """
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Buscar asistencias de días anteriores
+        cursor.execute("""
+            SELECT COUNT(*) as total
+            FROM asistencias
+            WHERE DATE(fecha_hora) < DATE(?)
+        """, (fecha_hoy,))
+
+        total_antiguos = cursor.fetchone()[0]
+
+        if total_antiguos > 0:
+            # Guardar backup antes de limpiar
+            guardar_asistencias_del_dia_automatico()
+
+            # Eliminar asistencias antiguas (solo mantener el día actual)
+            cursor.execute("DELETE FROM asistencias WHERE DATE(fecha_hora) < DATE(?)", (fecha_hoy,))
+            conn.commit()
+
+            # Limpiar histórico de más de 30 días
+            limpiar_historial_antiguo(30)
+
+            return True, f"✅ Se archivaron {total_antiguos} registros antiguos."
+
+    return False, "No hay registros antiguos para archivar."
 
 
 if __name__ == "__main__":

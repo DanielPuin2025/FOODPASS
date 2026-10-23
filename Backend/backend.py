@@ -28,7 +28,9 @@ def autenticar_usuario(usuario, password, es_admin):
     usr = db.buscar_usuario_sistema(usuario)
     if usr:
         rol_requerido = "administrador" if es_admin else "docente"
-        if usr["rol"] == rol_requerido and usr["password"] == password:
+        if usr["rol"] == rol_requerido and db.verificar_password(
+            password, usr["password"]
+        ):
             return True, usr["nombre"]
     return False, None
 

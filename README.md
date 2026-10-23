@@ -1,209 +1,127 @@
-# FoodPass - Sistema de Control de Asistencia
+# FoodPass
 
-FoodPass es una aplicación de gestión de asistencia para restaurantes escolares, desarrollada en Python con Flet. Utiliza SQLite como base de datos y soporta registro mediante código QR o ingreso manual.
+FoodPass es una aplicación web hecha en Python y Flet. Usa SQLite; no necesita
+MySQL ni Apache para funcionar. En local guarda `restaurante.db` en la raíz.
+En el contenedor, la base y los respaldos se guardan en el volumen configurado
+en `FOODPASS_DATA_DIR`.
 
-## 🚀 Características
+## Instalación
 
-- **Autenticación de usuarios** (docentes y administradores)
-- **Registro de asistencia** mediante QR o manual
-- **Gestión de estudiantes** (alta, baja, consulta)
-- **Control de horarios** configurables
-- **Historial de asistencias** con estadísticas
-- **Interfaz responsive** para web y escritorio
+Desde PowerShell, en la carpeta `C:\xampp\htdocs\FOODPASS`:
 
-## 📋 Requisitos
-
-- Python 3.12 o superior
-- Cámara web (opcional, para escaneo QR)
-- Sistema operativo: Windows, Linux o macOS
-
-## 🔧 Instalación Local
-
-### 1. Clonar el repositorio
-
-```bash
-git clone <tu-repositorio>
-cd FOODPASS
-```
-
-### 2. Crear entorno virtual
-
-**Windows (PowerShell):**
 ```powershell
-python -m venv .venv-foodpass
+py -m venv .venv-foodpass
 .\.venv-foodpass\Scripts\Activate.ps1
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
 ```
 
-**Linux/macOS:**
-```bash
-python3 -m venv .venv-foodpass
-source .venv-foodpass/bin/activate
+Si PowerShell bloquea la activación, ejecuta directamente:
+
+```powershell
+.\.venv-foodpass\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 3. Instalar dependencias
+## Ejecución
 
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
+```powershell
+py DATABASE\crear_bd.py
+py start_app.py
 ```
 
-### 4. Inicializar la base de datos
+Se abrirá la aplicación en el navegador. También puedes usar el intérprete del
+entorno virtual:
 
-```bash
-python DATABASE/crear_bd.py
+```powershell
+.\.venv-foodpass\Scripts\python.exe start_app.py
 ```
 
-### 5. Ejecutar la aplicación
+## Demostración sin hosting
 
-```bash
-python FRONTEND/frontend.py
+Puedes presentar el sistema desde un portátil conectado a la misma red Wi-Fi
+que los equipos del jurado. La aplicación escucha en el puerto local `8550`.
+
+En el portátil, consulta su dirección IP:
+
+```powershell
+ipconfig
 ```
 
-La aplicación se abrirá automáticamente en tu navegador predeterminado en `http://localhost:8550`
+Busca la `Dirección IPv4` de la conexión Wi-Fi, por ejemplo `192.168.1.25`.
+Ejecuta la aplicación y comparte esta dirección con el jurado:
 
-## 🌐 Despliegue en Railway
-
-### Paso 1: Preparar el repositorio
-
-1. Inicializa Git (si no lo has hecho):
-```bash
-git init
-git add .
-git commit -m "Initial commit"
+```text
+http://192.168.1.25:8550
 ```
 
-2. Sube tu código a GitHub:
-```bash
-git remote add origin <tu-repositorio-github>
-git branch -M main
-git push -u origin main
+Todos los dispositivos deben estar conectados a la misma red y el portátil
+debe permanecer encendido mientras dure la demostración. Si Windows Firewall
+pregunta, permite Python en redes privadas. También puedes crear una regla
+temporal como administrador:
+
+```powershell
+New-NetFirewallRule -DisplayName "FoodPass demo 8550" -Direction Inbound -Protocol TCP -LocalPort 8550 -Action Allow -Profile Private
 ```
 
-### Paso 2: Configurar Railway
+Para una presentación sin Wi-Fi, conecta los dispositivos al punto de acceso
+móvil del portátil o de un teléfono y repite `ipconfig` para obtener la IP.
 
-1. Ve a [railway.app](https://railway.app) y crea una cuenta
-2. Haz clic en "New Project" → "Deploy from GitHub repo"
-3. Selecciona tu repositorio FOODPASS
-4. Railway detectará automáticamente el proyecto Python
+## Credenciales iniciales
 
-### Paso 3: Variables de entorno (opcional)
+Estas credenciales solo se crean en modo de desarrollo local.
 
-Si necesitas configuraciones específicas, añade variables en Railway:
-- `PYTHON_VERSION`: 3.12.0 (ya está en runtime.txt)
-- `PORT`: Railway lo asigna automáticamente
+Modo docente:
 
-### Paso 4: Deploy
+- Usuario: `docente`
+- Contraseña: `docente123`
 
-Railway desplegará automáticamente tu aplicación. Obtendrás una URL pública como:
-```
-https://foodpass-production.up.railway.app
-```
+Modo administrador:
 
-## 🔑 Credenciales por Defecto
+- Usuario: `admin`
+- Contraseña: `admin123`
 
-### Modo Docente
-- **Usuario:** `docente`
-- **Contraseña:** `docente123`
+También existen los usuarios `2001` / `docente123` y `3001` / `admin123`.
 
-### Modo Administrador
-- **Usuario:** `admin`
-- **Contraseña:** `admin123`
+En producción no se crean estas cuentas de prueba. La primera inicialización
+requiere configurar en el entorno del servicio las variables secretas
+`FOODPASS_ADMIN_USER`, `FOODPASS_ADMIN_PASSWORD`, `FOODPASS_DOCENTE_USER` y
+`FOODPASS_DOCENTE_PASSWORD`. Los usuarios deben ser distintos y cada contraseña
+debe tener al menos 12 caracteres. Las contraseñas se almacenan con hash PBKDF2.
 
-**⚠️ Importante:** Cambia estas credenciales después del primer inicio de sesión.
+## Archivos de datos
 
-## 📁 Estructura del Proyecto
+- `restaurante.db`: base activa del sistema.
+- `DATABASE\estudiantes.csv`: fuente de carga inicial, si la base no tiene estudiantes.
+- `historial_reinicios\`: copias creadas al reiniciar la plataforma.
+- `historial_reinicios\legacy\`: bases antiguas conservadas como referencia.
 
-```
-FOODPASS/
-├── Backend/
-│   └── backend.py              # Lógica de negocio y cámara
-├── DATABASE/
-│   ├── crear_bd.py             # Inicialización de BD
-│   ├── gestion_estudiantes.py  # CRUD de estudiantes
-│   ├── cargar_masivo.py        # Carga desde CSV
-│   └── estudiantes.csv         # Datos iniciales
-├── FRONTEND/
-│   ├── frontend.py             # Interfaz principal
-│   ├── logo.png                # Logo de la app
-│   └── imagen_restaurante.png  # Imagen de fondo
-├── requirements.txt            # Dependencias Python
-├── runtime.txt                 # Versión de Python
-├── Procfile                    # Comando de inicio
-├── nixpacks.toml              # Configuración Railway
-├── railway.json               # Config Railway
-└── README.md                  # Este archivo
-```
+Las bases antiguas se conservan como referencia para no perder asistencias
+históricas, pero la aplicación no las usa.
 
-## 🛠️ Uso de la Aplicación
+Desde el historial de reinicios, cada registro se puede descargar en formato
+CSV. Al cerrar sesión como docente o administrador, se limpian los campos de
+usuario y contraseña del formulario de acceso.
 
-### Registro de Asistencia
+## Despliegue con Docker / Easypanel
 
-1. **Login:** Ingresa con tus credenciales
-2. **Escaneo QR:** Coloca el código QR del estudiante frente a la cámara
-3. **Ingreso Manual:** Escribe el ID del estudiante si no tienes cámara
+El repositorio incluye un `Dockerfile`. Configura el servicio de Easypanel para
+construir desde ese archivo y asigna el puerto interno `8550`. El puerto `3000`
+corresponde al panel, no a la aplicación.
 
-### Gestión de Estudiantes (Admin)
+1. Crea un volumen persistente y móntalo en `/app/data`.
+2. Configura las cuatro variables secretas de administrador/docente indicadas
+   arriba antes del primer arranque. La aplicación se detendrá si faltan o si
+   alguna contraseña tiene menos de 12 caracteres.
+3. Si necesitas cargar el listado inicial, copia `estudiantes.csv` al volumen
+   como `/app/data/estudiantes.csv` antes de iniciar la aplicación. No subas ese
+   archivo, las bases SQLite ni los respaldos a GitHub.
+4. En Easypanel asigna el dominio `foodpass.programasena.online` al servicio y
+   activa HTTPS. El DNS debe tener un registro A hacia la IP pública del
+   servidor.
+5. La app se sirve en la raíz del dominio. La ruta
+   `/projects/sustentaciones2026` corresponde al panel de Easypanel, no a la
+   dirección pública de FoodPass.
 
-1. **Agregar:** Completa el formulario con datos del estudiante
-2. **Editar:** Busca al estudiante y modifica sus datos
-3. **Eliminar:** Busca y elimina estudiantes del sistema
-4. **Consultar:** Revisa el historial de asistencias
-
-### Configuración de Horarios (Admin)
-
-Define el rango horario en que se permite registrar asistencias.
-
-## 📊 Base de Datos
-
-El sistema utiliza SQLite con las siguientes tablas:
-
-- **estudiantes:** Información de los estudiantes
-- **asistencias:** Registro de asistencias con fecha/hora
-- **usuarios:** Credenciales de docentes y administradores
-- **configuracion:** Parámetros del sistema (horarios, etc.)
-
-## 🐛 Solución de Problemas
-
-### La cámara no funciona
-
-Verifica que:
-- Tienes `opencv-python` y `pyzbar` instalados
-- La cámara está conectada y con permisos
-- Otro programa no está usando la cámara
-
-### Error al ejecutar en Railway
-
-Railway requiere que:
-- `nixpacks.toml` incluya `zbar` en nixPkgs (ya configurado)
-- El puerto sea dinámico (Flet lo maneja automáticamente)
-- La aplicación use Flet web mode (ya configurado)
-
-### Base de datos vacía
-
-Ejecuta:
-```bash
-python DATABASE/crear_bd.py
-python DATABASE/cargar_masivo.py
-```
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-
-1. Haz fork del proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/nueva-funcionalidad`)
-3. Commit tus cambios (`git commit -m 'Añade nueva funcionalidad'`)
-4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Abre un Pull Request
-
-## 📄 Licencia
-
-Este proyecto es de código abierto y está disponible bajo la licencia MIT.
-
-## 📧 Contacto
-
-Para preguntas o soporte, abre un issue en el repositorio.
-
----
-
-**Desarrollado con ❤️ para la gestión eficiente de comedores escolares**
+El lector QR actual abre una cámara conectada al proceso Python. En un
+contenedor remoto no habrá cámara disponible por defecto; para escanear desde
+el celular/navegador se necesita una integración de cámara del lado del cliente.

@@ -1,3 +1,4 @@
-flet>=0.25,<1
-opencv-python>=4.8
+flet>=1.0.5,<2
+opencv-python-headless>=4.8
 pyzbar>=0.1.9
+openpyxl>=3.1.5
