@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import base64
 import csv
 import io
@@ -23,6 +23,10 @@ LOGO_SENA_PATH = os.path.abspath(os.path.join(FRONTEND_DIR, "logo_sena_ok.png"))
 LOGO_SENA_BYTES = (
     open(LOGO_SENA_PATH, "rb").read() if os.path.exists(LOGO_SENA_PATH) else None
 )
+LOGO_INST_PATH = os.path.abspath(os.path.join(FRONTEND_DIR, "logo-institucion-cusiana.png"))
+LOGO_INST_BYTES = (
+    open(LOGO_INST_PATH, "rb").read() if os.path.exists(LOGO_INST_PATH) else None
+)
 IMAGEN_RESTAURANTE_PATH = os.path.abspath(os.path.join(FRONTEND_DIR, "imagen_restaurante.png"))
 IMAGEN_RESTAURANTE_BYTES = (
     open(IMAGEN_RESTAURANTE_PATH, "rb").read() if os.path.exists(IMAGEN_RESTAURANTE_PATH) else None
@@ -35,6 +39,7 @@ for path in (ROOT_DIR, DATABASE_DIR):
 import flet as ft
 import gestion_estudiantes as db
 import Backend.backend as bk
+import Backend.scanner_web as scanner_web
 
 
 def leer_cola_sincronizacion():
@@ -172,7 +177,7 @@ async def vigilar_conexion(page):
         await asyncio.sleep(5)
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     # Inicializar las tablas SQLite en caso de que no existan
     db.crear_tablas()
 
@@ -189,7 +194,22 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker()
     page.services.append(file_picker)
-    camara_mgr = bk.CamaraManager()
+
+    def ancho_pagina():
+        return int(page.width or 1000)
+
+    def ancho_adapt(n, margen=24):
+        # Limita un ancho fijo al espacio disponible (celulares)
+        return int(min(n, max(200, ancho_pagina() - margen)))
+
+    async def esperar_tamano_pagina():
+        # El navegador reporta primero un tamaño provisional; se espera al real
+        previo, estable, t0 = None, 0, asyncio.get_running_loop().time()
+        while asyncio.get_running_loop().time() - t0 < 3 and estable < 3:
+            actual = page.width
+            estable = estable + 1 if actual == previo and actual else 0
+            previo = actual
+            await asyncio.sleep(0.15)
 
     async def descargar_en_navegador(nombre_archivo, contenido_bytes):
         try:
@@ -279,6 +299,7 @@ def main(page: ft.Page):
 
     # --- CONFIGURACIÓN DE TEMA Y ESTILO FOODPASS ---
     page.title = "FoodPass - Sistema de Control de Asistencia"
+    await esperar_tamano_pagina()
     page.bgcolor = "#F2F4ED"  # Fondo claro y limpio
     page.padding = 0
     page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
@@ -328,10 +349,19 @@ def main(page: ft.Page):
                     fit="contain",
                 )
             )
+        if LOGO_INST_BYTES is not None:
+            controles.append(
+                ft.Image(
+                    src=LOGO_INST_BYTES,
+                    width=40,
+                    height=52,
+                    fit="contain",
+                )
+            )
         controles.append(
             ft.Image(
                 src=src_logo,
-                width=width,
+                width=min(width, max(80, ancho_pagina() - 170)),
                 fit="contain",
                 error_content=ft.Text(
                     "FOODPASS",
@@ -398,13 +428,13 @@ def main(page: ft.Page):
                     content=ft.Row(
                         controls=[
                             ft.Container(
-                                width=380 * (porcentaje_presentes / 100),
+                                width=ancho_adapt(380, 100) * (porcentaje_presentes / 100),
                                 height=18,
                                 bgcolor=COLOR_VERDE_LOGICO,
                                 border_radius=9,
                             ),
                             ft.Container(
-                                width=380 * (porcentaje_ausentes / 100),
+                                width=ancho_adapt(380, 100) * (porcentaje_ausentes / 100),
                                 height=18,
                                 bgcolor="#E53935",
                                 border_radius=9,
@@ -412,7 +442,7 @@ def main(page: ft.Page):
                         ],
                         spacing=0,
                     ),
-                    width=380,
+                    width=ancho_adapt(380, 100),
                     height=18,
                     bgcolor="#E5E7EB",
                     border_radius=9,
@@ -439,7 +469,7 @@ def main(page: ft.Page):
         historial_input = ft.TextField(
             label="Buscar estudiante por ID",
             hint_text="Ej.: 1001",
-            width=260,
+            width=ancho_adapt(260, 84),
             border_color="#D1D5DB",
             color="black",
         )
@@ -636,7 +666,7 @@ def main(page: ft.Page):
                         on_click=volver_al_admin,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -644,7 +674,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=680,
+            width=ancho_adapt(680),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -772,7 +802,7 @@ def main(page: ft.Page):
                         on_click=volver_al_panel,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -780,7 +810,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=540,
+            width=ancho_adapt(540),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -912,7 +942,7 @@ def main(page: ft.Page):
                                 spacing=8,
                                 scroll=ft.ScrollMode.AUTO,
                             ),
-                            width=250,
+                            width=ancho_adapt(250, 84),
                             height=220,
                             bgcolor="#F8F9FA",
                             border=ft.Border.all(1, "#D1D5DB"),
@@ -928,7 +958,7 @@ def main(page: ft.Page):
                                 spacing=8,
                                 scroll=ft.ScrollMode.AUTO,
                             ),
-                            width=250,
+                            width=ancho_adapt(250, 84),
                             height=220,
                             bgcolor="#F8F9FA",
                             border=ft.Border.all(1, "#D1D5DB"),
@@ -960,7 +990,7 @@ def main(page: ft.Page):
                         on_click=volver_al_historial,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -968,7 +998,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=700,
+            width=ancho_adapt(700),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -1145,7 +1175,7 @@ def main(page: ft.Page):
                         on_click=volver_callback,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1153,7 +1183,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=580,
+            width=ancho_adapt(580),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -1215,7 +1245,7 @@ def main(page: ft.Page):
             ],
             color="black",
             height=50,
-            width=300,
+            width=ancho_adapt(300, 84),
         )
         input_hora_inicio = ft.TextField(
             label="Apertura (HH:MM)",
@@ -1471,28 +1501,28 @@ def main(page: ft.Page):
                         on_click=guardar_horario_admin,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                     ft.Button(
                         "📊 Ver Base de Datos Completa",
                         on_click=lambda e: abrir_vista_base_datos(nombre_admin),
                         bgcolor=COLOR_VERDE_LOGICO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                     ft.Button(
                         "🔄 Reiniciar Plataforma",
                         on_click=reiniciar_plataforma_admin,
                         bgcolor="#D32F2F",
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                     ft.Button(
                         "🗂️ Historial de reinicios",
                         on_click=ver_historial_admin,
                         bgcolor="#5C6BC0",
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                     ft.Divider(),
                     ft.Text(
@@ -1508,7 +1538,7 @@ def main(page: ft.Page):
                         on_click=agregar_estudiante,
                         bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
-                        width=360,
+                        width=ancho_adapt(360, 84),
                     ),
                     ft.Divider(),
                     ft.Text(
@@ -1539,7 +1569,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=480,
+            width=ancho_adapt(480),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -1549,42 +1579,20 @@ def main(page: ft.Page):
     # VISTA: ESCÁNER QR
     # -------------------------------------------------------------------------
     def abrir_pagina_escaner(nombre_docente):
-        txt_estado_qr = ft.Text(
-            "Apunte el código QR a la Cámara",
-            size=16,
-            weight=ft.FontWeight.BOLD,
-            color=COLOR_VERDE_OSCURO,
-        )
-        img_camara = ft.Image(
-            src=bk.PIXEL_TRANSPARENTE, width=640, height=480, fit="contain"
-        )
-
-        dd_camara = ft.Dropdown(
-            label="Cámara",
-            value="0",
-            options=[
-                ft.dropdown.Option("0", "Cámara 0 (Integrada)"),
-                ft.dropdown.Option("1", "Cámara 1 (Externa / USB)"),
-                ft.dropdown.Option("2", "Cámara 2"),
-            ],
-            bgcolor="white",
-            color="black",
-            width=220,
-            height=40,
-        )
-
-        dd_camara.on_change = lambda e: camara_mgr.iniciar_transmision(
-            dd_camara.value, img_camara, txt_estado_qr, page
-        )
+        token = scanner_web.crear_token(nombre_docente)
 
         def volver_al_panel(e):
-            camara_mgr.detener_camara()
             mostrar_vista(
                 ft.Container(
                     content=construir_panel_docente(nombre_docente),
                     alignment=ft.Alignment(0, 0),
                     expand=True,
                 )
+            )
+
+        async def abrir_camara(e):
+            await ft.UrlLauncher().launch_url(
+                f"/escaner?t={token}", web_only_window_name="_blank"
             )
 
         layout_escaner = ft.Container(
@@ -1596,51 +1604,42 @@ def main(page: ft.Page):
                         size=20,
                         weight=ft.FontWeight.BOLD,
                         color=COLOR_VERDE_OSCURO,
+                        text_align=ft.TextAlign.CENTER,
                     ),
-                    txt_estado_qr,
-                    ft.Row(
-                        controls=[
-                            dd_camara,
-                            ft.Button(
-                                "Reiniciar Cámara",
-                                on_click=lambda e: camara_mgr.iniciar_transmision(
-                                    dd_camara.value,
-                                    img_camara,
-                                    txt_estado_qr,
-                                    page,
-                                ),
-                                bgcolor=COLOR_AMARILLO_LOGO,
-                                color="white",
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=10,
+                    ft.Text(
+                        "Se abrirá la cámara de su dispositivo en una pestaña nueva. "
+                        "Acepte el permiso de cámara cuando el navegador lo solicite.",
+                        size=14,
+                        color="black",
+                        text_align=ft.TextAlign.CENTER,
+                        width=ancho_adapt(420, 40),
                     ),
-                    ft.Container(
-                        content=img_camara,
-                        border=ft.Border.all(3, COLOR_VERDE_LOGICO),
-                        border_radius=10,
-                        bgcolor="black",
+                    ft.Button(
+                        "Abrir cámara y escanear",
+                        icon=ft.Icons.QR_CODE_SCANNER,
+                        on_click=abrir_camara,
+                        bgcolor=COLOR_VERDE_LOGICO,
+                        color="white",
+                        height=52,
+                        width=ancho_adapt(300, 40),
                     ),
                     ft.Button(
                         "Volver al Panel",
                         on_click=volver_al_panel,
-                        bgcolor=COLOR_VERDE_LOGICO,
+                        bgcolor=COLOR_AMARILLO_LOGO,
                         color="white",
+                        height=48,
+                        width=ancho_adapt(300, 40),
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=12,
+                spacing=16,
             ),
             alignment=ft.Alignment(0, 0),
             expand=True,
         )
 
         mostrar_vista(layout_escaner)
-        camara_mgr.iniciar_transmision(
-            dd_camara.value, img_camara, txt_estado_qr, page
-        )
-
     # -------------------------------------------------------------------------
     # VISTA: PANEL DEL DOCENTE
     # -------------------------------------------------------------------------
@@ -1884,7 +1883,7 @@ def main(page: ft.Page):
                                 ft.Button(
                                     "📷 Escáner QR",
                                     on_click=lambda e: abrir_pagina_escaner(nombre_docente),
-                                    width=200,
+                                    width=ancho_adapt(200, 84),
                                     height=40,
                                     bgcolor=COLOR_AMARILLO_LOGO,
                                     color="white",
@@ -1978,7 +1977,7 @@ def main(page: ft.Page):
                 scroll=ft.ScrollMode.AUTO,
             ),
             bgcolor=COLOR_BLANCO,
-            width=500,
+            width=ancho_adapt(500),
             padding=25,
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),
@@ -2024,7 +2023,7 @@ def main(page: ft.Page):
         content=ft.Text("INICIAR SESIÓN", color="white"),
         bgcolor=COLOR_VERDE_LOGICO,
         height=45,
-        width=360,
+        width=ancho_adapt(360, 84),
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8)),
     )
 
@@ -2047,7 +2046,7 @@ def main(page: ft.Page):
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         bgcolor=COLOR_BLANCO,
-        width=420,
+        width=ancho_adapt(420),
         padding=30,
         border_radius=15,
         shadow=ft.BoxShadow(blur_radius=15, color="#1A000000"),

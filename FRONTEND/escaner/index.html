@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FoodPass - Escáner QR</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f4f7f2; color: #1b3a10;
+         display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 1.15rem; margin: 6px 0 10px; text-align: center; }
+  #caja { position: relative; width: 100%; max-width: 520px; aspect-ratio: 3/4; background: #000;
+          border: 3px solid #3d8b1f; border-radius: 12px; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; }
+  #mira { position: absolute; inset: 20%; border: 3px solid rgba(255,255,255,.8); border-radius: 12px; pointer-events: none; }
+  #estado { margin: 12px 0; padding: 12px; width: 100%; max-width: 520px; border-radius: 10px;
+            background: #fff; text-align: center; font-weight: 600; min-height: 48px; }
+  #estado.ok { background: #d9f2d0; } #estado.err { background: #fde0e0; } #estado.warn { background: #fff3cd; }
+  .fila { display: flex; gap: 8px; width: 100%; max-width: 520px; flex-wrap: wrap; }
+  button, select { flex: 1; min-height: 48px; font-size: 1rem; border-radius: 10px; border: 0; padding: 0 12px; }
+  button { background: #3d8b1f; color: #fff; font-weight: 600; }
+  select { background: #fff; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<h1>ESCÁNER DE CÓDIGO QR</h1>
+<div id="caja"><video id="video" playsinline muted autoplay></video><div id="mira"></div></div>
+<div id="estado">Iniciando cámara…</div>
+<div class="fila">
+  <select id="camaras" aria-label="Cámara"></select>
+  <button id="reiniciar" type="button">Reiniciar cámara</button>
+</div>
+<div class="fila" style="margin-top:8px"><button id="cerrar" type="button" style="background:#777">Cerrar</button></div>
+<canvas id="lienzo" hidden></canvas>
+<script src="/escaner/jsQR.js"></script>
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const video = document.getElementById("video");
+const estado = document.getElementById("estado");
+const selCam = document.getElementById("camaras");
+const lienzo = document.getElementById("lienzo");
+const ctx = lienzo.getContext("2d", { willReadFrequently: true });
+let stream = null, activo = false, ultimo = "", ultimoT = 0, enviando = false;
+const detector = ("BarcodeDetector" in window) ? new BarcodeDetector({ formats: ["qr_code"] }) : null;
+
+function msg(texto, clase) { estado.textContent = texto; estado.className = clase || ""; }
+
+async function detener() {
+  activo = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+
+async function iniciar() {
+  await detener();
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msg("La cámara requiere una conexión segura (HTTPS) y un navegador compatible.", "err");
+    return;
+  }
+  const id = selCam.value;
+  const video_c = id ? { deviceId: { exact: id } } : { facingMode: { ideal: "environment" } };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: video_c, audio: false });
+  } catch (e) {
+    const causa = e && e.name === "NotAllowedError"
+      ? "Permiso de cámara denegado. Actívelo en los ajustes del navegador y pulse Reiniciar."
+      : e && e.name === "NotFoundError" ? "No se encontró ninguna cámara."
+      : "No se pudo abrir la cámara (" + (e && e.name) + "). Puede estar en uso por otra app.";
+    msg(causa, "err");
+    return;
+  }
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  try {
+    const lista = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+    const actual = stream.getVideoTracks()[0].getSettings().deviceId;
+    selCam.innerHTML = lista.map((d, i) =>
+      `<option value="${d.deviceId}">${d.label || "Cámara " + (i + 1)}</option>`).join("");
+    if (actual) selCam.value = actual;
+  } catch (e) {}
+  activo = true;
+  msg("Apunte el código QR a la cámara");
+  bucle();
+}
+
+async function leer() {
+  if (detector) {
+    try { const r = await detector.detect(video); if (r.length) return r[0].rawValue; } catch (e) {}
+  }
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return null;
+  const esc = Math.min(1, 640 / w);
+  lienzo.width = Math.round(w * esc); lienzo.height = Math.round(h * esc);
+  ctx.drawImage(video, 0, 0, lienzo.width, lienzo.height);
+  const img = ctx.getImageData(0, 0, lienzo.width, lienzo.height);
+  const c = window.jsQR ? jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" }) : null;
+  return c ? c.data : null;
+}
+
+async function enviar(codigo) {
+  enviando = true;
+  try {
+    const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, codigo }) });
+    const j = await r.json();
+    const msj = j.mensaje || j.detail || "Respuesta inesperada";
+    msg(msj, r.status === 401 ? "err" : j.ok ? "ok" : (msj.includes("ya registró") ? "warn" : "err"));
+    if (navigator.vibrate) navigator.vibrate(j.ok ? 80 : [60, 40, 60]);
+  } catch (e) {
+    msg("Sin conexión con el servidor. Reintente.", "err");
+  }
+  enviando = false;
+}
+
+async function bucle() {
+  while (activo) {
+    if (!enviando && video.readyState >= 2) {
+      const codigo = await leer();
+      const ahora = Date.now();
+      if (codigo && (codigo !== ultimo || ahora - ultimoT > 4000)) {
+        ultimo = codigo; ultimoT = ahora;
+        await enviar(codigo);
+      }
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+
+document.getElementById("reiniciar").onclick = iniciar;
+selCam.onchange = iniciar;
+document.getElementById("cerrar").onclick = () => { detener(); window.close(); history.back(); };
+if (!token) msg("Abra el escáner desde el panel docente.", "err"); else iniciar();
+</script>
+</body>
+</html>
