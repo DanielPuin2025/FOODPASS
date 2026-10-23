@@ -3,7 +3,8 @@
 FoodPass es una aplicación web hecha en Python y Flet. Usa SQLite; no necesita
 MySQL ni Apache para funcionar. En local guarda `restaurante.db` en la raíz.
 En el contenedor, la base y los respaldos se guardan en el volumen configurado
-en `FOODPASS_DATA_DIR`.
+en `FOODPASS_DATA_DIR`. Los horarios de asistencia y las fechas de registro
+usan la hora de Colombia (UTC-5), incluso cuando el servidor está en otra zona.
 
 ## Instalación
 

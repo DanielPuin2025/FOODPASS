@@ -7,7 +7,6 @@ import os
 import sqlite3
 import sys
 import urllib.request
-from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -59,7 +58,7 @@ def guardar_cambio_pendiente(tipo, detalle=None):
         {
             "tipo": tipo,
             "detalle": detalle or {},
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "fecha": db.ahora_colombia().strftime("%Y-%m-%d %H:%M:%S"),
         }
     )
     with open(SYNC_QUEUE_PATH, "w", encoding="utf-8") as archivo:
@@ -913,7 +912,7 @@ async def main(page: ft.Page):
                                AND DATE(a.fecha_hora) = DATE(?)
                             ORDER BY e.apellidos, e.nombre
                             """,
-                            (fecha_ref or datetime.now().strftime("%Y-%m-%d"),),
+                            (fecha_ref or db.ahora_colombia().strftime("%Y-%m-%d"),),
                         ).fetchall()
                         for fila in filas:
                             nombre_completo = f"{fila[1]} {fila[2]}".strip()

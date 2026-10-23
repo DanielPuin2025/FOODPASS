@@ -7,7 +7,7 @@ import os
 import secrets
 import shutil
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -25,6 +25,11 @@ HISTORIAL_DIR.mkdir(exist_ok=True, parents=True)
 grados_disponibles = ["6A", "6B", "7A", "7B", "8A", "8B", "9A", "9B", "10A", "10B", "11A"]
 
 PASSWORD_HASH_ITERATIONS = 600_000
+COLOMBIA_TZ = timezone(timedelta(hours=-5), "COT")
+
+
+def ahora_colombia():
+    return datetime.now(COLOMBIA_TZ).replace(tzinfo=None)
 
 
 def _hash_password(password):
@@ -405,7 +410,7 @@ def esta_abierto_ahora():
     horario = obtener_horario()
     inicio_min = _hora_a_minutos(horario["hora_inicio"])
     fin_min = _hora_a_minutos(horario["hora_fin"])
-    ahora = datetime.now()
+    ahora = ahora_colombia()
     ahora_min = ahora.hour * 60 + ahora.minute
 
     if inicio_min is None or fin_min is None:
@@ -445,7 +450,7 @@ def registrar_asistencia(tarjeta_o_codigo):
     nombre_completo = f"{estudiante['nombre']} {estudiante['apellidos']}"
 
     # Verificar si ya registró asistencia hoy
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -456,7 +461,7 @@ def registrar_asistencia(tarjeta_o_codigo):
         if cursor.fetchone():
             return False, f"⚠️ {nombre_completo} ya registró asistencia hoy."
 
-        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha_actual = ahora_colombia().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("""
             INSERT INTO asistencias (tarjeta_estudiante, fecha_hora)
             VALUES (?, ?)
@@ -495,7 +500,7 @@ def eliminar_estudiante_db(codigo):
         return False, "❌ No se encontró ningún estudiante con ese ID."
 
 def obtener_estudiantes_por_grado(grado):
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -511,7 +516,7 @@ def obtener_estudiantes_por_grado(grado):
         return cursor.fetchall()
 
 def obtener_reporte_completo_db():
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -527,7 +532,7 @@ def obtener_reporte_completo_db():
 
 
 def obtener_historial_estudiante(codigo):
-    fecha_hoy = datetime.now().date()
+    fecha_hoy = ahora_colombia().date()
     inicio_semana = fecha_hoy - timedelta(days=fecha_hoy.weekday())
     fin_semana = inicio_semana + timedelta(days=6)
     inicio_mes = fecha_hoy.replace(day=1)
@@ -588,7 +593,7 @@ def obtener_historial_estudiante(codigo):
 
 def guardar_backup_actual():
     HISTORIAL_DIR.mkdir(exist_ok=True, parents=True)
-    timestamp = datetime.now()
+    timestamp = ahora_colombia()
     fecha = timestamp.date()
     semana = fecha.isocalendar()[1]
     mes_nombre = calendar.month_name[fecha.month]
@@ -619,7 +624,7 @@ def guardar_backup_actual():
 
 
 def contar_asistencias_hoy():
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -635,7 +640,9 @@ def listar_historial_reinicios():
     for path in sorted(HISTORIAL_DIR.rglob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
         resumen = path.with_suffix(".json")
         try:
-            fecha_str = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d/%m/%Y %H:%M:%S")
+            fecha_str = datetime.fromtimestamp(
+                path.stat().st_mtime, COLOMBIA_TZ
+            ).strftime("%d/%m/%Y %H:%M:%S")
         except Exception:
             fecha_str = path.name
 
@@ -713,7 +720,7 @@ def guardar_asistencias_del_dia_automatico():
     Guarda automáticamente las asistencias del día en el historial
     sin borrar los datos actuales. Se ejecuta al finalizar el horario.
     """
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
 
     # Verificar si ya hay asistencias hoy
     with get_connection() as conn:
@@ -725,7 +732,7 @@ def guardar_asistencias_del_dia_automatico():
             return False, "No hay asistencias para guardar hoy."
 
     # Crear backup solo del día actual
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = ahora_colombia().strftime("%Y%m%d_%H%M%S")
     nombre_backup = f"asistencias_{timestamp}.db"
     ruta_backup = HISTORIAL_DIR / nombre_backup
 
@@ -741,7 +748,7 @@ def limpiar_historial_antiguo(dias_limite=30):
     """
     Elimina backups de más de 'dias_limite' días para mantener el histórico limpio.
     """
-    fecha_limite = datetime.now() - timedelta(days=dias_limite)
+    fecha_limite = ahora_colombia() - timedelta(days=dias_limite)
     eliminados = 0
 
     for archivo in HISTORIAL_DIR.glob("asistencias_*.db"):
@@ -766,7 +773,7 @@ def verificar_y_archivar_dia_anterior():
     Verifica si hay asistencias de días anteriores y las archiva.
     Esto se ejecuta al inicio del sistema cada día.
     """
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    fecha_hoy = ahora_colombia().strftime("%Y-%m-%d")
 
     with get_connection() as conn:
         cursor = conn.cursor()
