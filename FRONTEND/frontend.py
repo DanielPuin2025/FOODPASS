@@ -30,6 +30,10 @@ IMAGEN_RESTAURANTE_PATH = os.path.abspath(os.path.join(FRONTEND_DIR, "imagen_res
 IMAGEN_RESTAURANTE_BYTES = (
     open(IMAGEN_RESTAURANTE_PATH, "rb").read() if os.path.exists(IMAGEN_RESTAURANTE_PATH) else None
 )
+IMAGEN_CREADORES_PATH = os.path.abspath(os.path.join(FRONTEND_DIR, "creadores foodpass.png"))
+IMAGEN_CREADORES_BYTES = (
+    open(IMAGEN_CREADORES_PATH, "rb").read() if os.path.exists(IMAGEN_CREADORES_PATH) else None
+)
 
 for path in (ROOT_DIR, DATABASE_DIR):
     if path not in sys.path:
@@ -1243,6 +1247,85 @@ async def main(page: ft.Page):
             )
         )
 
+    def mostrar_creadores(e):
+        """Muestra un diálogo con la información de los creadores de FoodPass"""
+        def cerrar_dialogo(e):
+            dlg_creadores.open = False
+            page.update()
+
+        contenido_creadores = ft.Column(
+            controls=[
+                ft.Text(
+                    "CREADORES DE FOODPASS",
+                    size=20,
+                    weight=ft.FontWeight.BOLD,
+                    color=COLOR_VERDE_OSCURO,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Divider(color=COLOR_VERDE_LOGICO),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=15,
+        )
+
+        # Agregar imagen si existe
+        if IMAGEN_CREADORES_BYTES:
+            contenido_creadores.controls.append(
+                ft.Image(
+                    src=IMAGEN_CREADORES_BYTES,
+                    width=min(400, ancho_pagina() - 100),
+                    fit="contain",
+                    border_radius=10,
+                )
+            )
+
+        # Agregar nombres de los creadores
+        creadores = [
+            "HERNANDEZ TORRES WILLIAM ANDRES",
+            "MORENO TOVAR ANTHONY JULIAN",
+            "PORRES MONTOYA DAYRON"
+        ]
+
+        contenido_creadores.controls.append(
+            ft.Text(
+                "Desarrollado por:",
+                size=16,
+                weight=ft.FontWeight.BOLD,
+                color=COLOR_VERDE_OSCURO,
+            )
+        )
+
+        for creador in creadores:
+            contenido_creadores.controls.append(
+                ft.Text(
+                    f"• {creador}",
+                    size=14,
+                    color="black",
+                    text_align=ft.TextAlign.CENTER,
+                )
+            )
+
+        dlg_creadores = ft.AlertDialog(
+            modal=True,
+            content=ft.Container(
+                content=contenido_creadores,
+                width=min(450, ancho_pagina() - 50),
+                padding=10,
+            ),
+            actions=[
+                ft.TextButton(
+                    "Cerrar",
+                    on_click=cerrar_dialogo,
+                    style=ft.ButtonStyle(color=COLOR_VERDE_LOGICO)
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.CENTER,
+        )
+
+        page.overlay.append(dlg_creadores)
+        dlg_creadores.open = True
+        page.update()
+
     def construir_panel_admin(nombre_admin):
         txt_saludo = ft.Text(
             f"PANEL ADMINISTRADOR - {nombre_admin.upper()}",
@@ -2088,6 +2171,22 @@ async def main(page: ft.Page):
                 lbl_mensaje,
                 ft.Container(height=10),
                 contenido_formulario,
+                ft.Container(height=20),
+                ft.Divider(color="#D1D5DB"),
+                ft.Text(
+                    "Derechos Reservados para:",
+                    size=12,
+                    color="#616161",
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Button(
+                    "👥 Ver Creadores",
+                    on_click=mostrar_creadores,
+                    bgcolor=COLOR_VERDE_LOGICO,
+                    color="white",
+                    width=ancho_adapt(280, 84),
+                    height=40,
+                ),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         ),
